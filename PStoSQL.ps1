@@ -3,45 +3,51 @@
 # Date: 07-May-2016
 # URL: https://github.com/ljnotes/PStoSQL.git
 # Description: PS script to make connection to SQL Server database, read data and write data back based on the passed in configuration. 
+#              The script also includes the functionality to save the data to Excel file 
 
 # Uncomment the following if the script should be run in admin mode
 # #Requires -RunAsAdministrator
 
-# Variables - begins
+param
+(
+    ## 
+    ## Database information
+    ## 
 
-## Database variables
+    # Set the Server name here 
+    # Named instances can be set like servername\instancename 
+    [string]$SQLServer = "MyServer\MyInstance"
 
-# Set the Server name here 
-# Named instances can be set like servername\instancename 
-$SQLServer = "MyServer\MyInstance"
+    # Set the database name
+    ,[string]$SQLDatabase = "master" 
 
-# Set the database name 
-$SQLDatabase = "master"
+    # Set the connection string
+    ,[string]$SQLConnectionString = $null
 
-# Set the connection string
-$SQLConnectionString = $null
+    # Set the SQL query here 
+    ,[string]$SQLQuery = "SELECT TOP 33 * FROM dbo.syscomments(NOLOCK)"
 
-# Set the SQL query here
-$SQLQuery = "SELECT * FROM dbo.syscomments(NOLOCK)"
+    ## 
+    ## File and Directory information
+    ##  
 
-## File and Directory information 
+    # Should save as file
+    ,[bool]$ResultToExcel = $true 
 
-# Should save as file
-$ResultToExcel = $true;
+    # Directory where the file should be saved to
+    ,[string]$ResultDirectory = 'C:\Temp\'
 
-# Directory where the file should be saved to
-$ResultDirectory = 'C:\Temp\'
-
-# File name 
-$ResultFileName = "MyDataSet"
+    # File name 
+    ,[string]$ResultFileName = "MyDataSet"
+    
+) 
 
 ## SQL Connection, Command, Adapter and dataset object 
 $SQLConnectionObj = $null
 $SQLCommandObj = $null
 $SQLDataAdapterObj = $null
-$SQLDatasetObj = $null
-
-# Variables - ends
+$DatasetObj = $null
+$DatatableObj = $null
 
 # Make connection to the SQL Server and get the data
 try
@@ -60,8 +66,6 @@ try
         $SQLConnectionObj.ConnectionString = $SQLConnectionString
     }
 
-    Write-Host 'Connection string is: ' $SQLConnectionString
-
     # Create SQL command object
     $SQLCommandObj = New-Object System.Data.SqlClient.SqlCommand
     $SQLCommandObj.CommandText = $SQLQuery;
@@ -72,8 +76,9 @@ try
     $SQLDataAdapterObj.SelectCommand = $SQLCommandObj;
 
     # Create Data-set to store the data and get the data using adapter
-    $SQLDatasetObj = New-Object System.Data.DataSet
-    $SQLDataAdapterObj.Fill($SQLDatasetObj)
+    $DatasetObj = New-Object System.Data.DataSet
+    $SQLDataAdapterObj.Fill($DatasetObj)
+    $DatatableObj = $DatasetObj.Tables[0]
 
     # Clean-up
     $SQLConnectionObj.Close()
@@ -94,6 +99,9 @@ if($ResultToExcel)
         $ExcelWorkSheet = $null
         $ExcelWorkSheetCurrent = 1
         $ExcelFilePath = $null
+        $ExcelDataColumns = $null
+        $ExcelRowOffset = 1
+        $ExcelColOffset = 1
 
         # Create Excel Application object 
         $ExcelObj = New-Object -ComObject Excel.Application
@@ -101,26 +109,58 @@ if($ResultToExcel)
         $ExcelObj.Visible = $false
 
         # Create the Work book and sheet 
-        $ExcelWorkBook = $ExcelObj.Workbooks.Add()
-        # By default, we will have 3 worksheets created
+        $ExcelWorkBook = $ExcelObj.Workbooks.Add() 
         $ExcelWorkSheet = $ExcelWorkBook.Worksheets.Item($ExcelWorkSheetCurrent)
 
-        # Save the file
+        # Set the font and formatting
+        $ExcelWorkSheet.Cells.Font.Name = "Calibri"
+        $ExcelWorkSheet.Cells.Font.Size = 10
+
+        ## Write the data to the sheet
+
+        # Create the header with columns in the result set 
+        $ExcelDataColumns = $DatatableObj.Columns
+        foreach($DataColumn in $ExcelDataColumns)
+        {
+            # Set the font weight to bold and write the column name in the cell
+            $ExcelWorkSheet.Cells($ExcelRowOffset, $ExcelColOffset).Font.Bold = $true
+            $ExcelWorkSheet.Cells($ExcelRowOffset, $ExcelColOffset) = $DataColumn.ColumnName
+            $ExcelColOffset++
+        }
+
+        # Write the data rows
+        $ExcelDataRows = $DatatableObj.Rows
+        foreach($DataRow in $ExcelDataRows)
+        {
+            # Set row and column
+            $ExcelRowOffset++
+            $ExcelColOffset = 1
+
+            foreach($item in $DataRow.ItemArray)
+            {
+                $ExcelWorkSheet.Cells($ExcelRowOffset, $ExcelColOffset) = $item.ToString()
+                $ExcelColOffset++
+            }
+        }
+
+        ## Save the file
+
         $ExcelFilePath = "$ResultDirectory$ResultFileName.xlsx"
 
-        # Delete the file if already exists 
+        # Delete the file if it already exists 
         if(Test-Path $ExcelFilePath)
         {
             Remove-Item $ExcelFilePath
         }
         $ExcelWorkBook.SaveAs($ExcelFilePath)
 
-        # Clean-up
+        ## Clean-up
+
         $ExcelWorkBook.Close()
         $ExcelObj.Quit()
     }
     catch
     {
-        'An error occured while saving the file - '  + $_.Exception.Message
+        'An error occured while saving the file - ' + $_.Exception.Message
     }
 }
